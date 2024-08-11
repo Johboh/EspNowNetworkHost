@@ -1,10 +1,6 @@
 FILE(GLOB_RECURSE sources "./src/impl/*.*")
 
-if(IDF_VERSION_MAJOR GREATER_EQUAL 5)
-set(required_components mbedtls esp_wifi esp_http_client esp_partition esp-tls nvs_flash bootloader_support app_update)
-else()
-set(required_components mbedtls esp_wifi esp_http_client esp-tls nvs_flash bootloader_support app_update)
-endif()
+set(required_components esp_wifi mbedtls)
 
 idf_component_register(COMPONENT_NAME "esp_now_network_host"
                         SRCS ${sources}
