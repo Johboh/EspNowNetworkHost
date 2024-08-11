@@ -1,2 +1,2 @@
 # EspNowNetworkHost
-Arduino (using Arduino IDE or PlatformIO) and ESP-IDF (using Espressif IoT Development Framework or PlatformIO) compatible library for setting up a network of ESP-NOW nodes - Host library
+Host library of [EspNowNetwork](https://github.com/Johboh/EspNowNetwork). See [EspNowNetwork](https://github.com/Johboh/EspNowNetwork) for more details.
