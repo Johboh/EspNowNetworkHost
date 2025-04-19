@@ -49,7 +49,7 @@ void EspNowHost::esp_now_on_data_callback_legacy(const uint8_t *mac_addr, const 
   }
 }
 
-#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 1, 0)
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
 void EspNowHost::esp_now_on_data_callback(const esp_now_recv_info_t *esp_now_info, const uint8_t *data, int data_len) {
   esp_now_on_data_callback_legacy(esp_now_info->src_addr, data, data_len);
 }
@@ -116,7 +116,7 @@ bool EspNowHost::start() {
     log("Initializing ESP-NOW OK.", ESP_LOG_INFO);
   }
 
-#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 1, 0)
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
   r = esp_now_register_recv_cb(esp_now_on_data_callback);
 #else
   r = esp_now_register_recv_cb(esp_now_on_data_callback_legacy);
