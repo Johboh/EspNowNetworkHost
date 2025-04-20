@@ -254,6 +254,7 @@ void EspNowHost::handleChallengeRequest(uint8_t *mac_addr, uint32_t challenge_ch
       EspNowChallengeFirmwareResponseV1 message;
       message.header_challenge = header_challenge;
       message.challenge_challenge = challenge_challenge;
+      message.timestamp = timestamp;
       strncpy(message.wifi_ssid, metadata->wifi_ssid, sizeof(message.wifi_ssid));
       strncpy(message.wifi_password, metadata->wifi_password, sizeof(message.wifi_password));
       strncpy(message.url, metadata->url, sizeof(message.url));
@@ -263,10 +264,10 @@ void EspNowHost::handleChallengeRequest(uint8_t *mac_addr, uint32_t challenge_ch
     }
   }
 
-  // Will be local time if timezone is set for host (setenv("TZ")), otherwise UTC.
+  // Timestamp in UTC.
   time_t now = time(nullptr);
-  struct tm *local_time = localtime(&now);
-  uint64_t timestamp = static_cast<uint64_t>(mktime(local_time));
+  struct tm *utc_time = gmtime(&now);
+  uint64_t timestamp = static_cast<uint64_t>(mktime(utc_time));
 
   auto payload = _payloads.find(mac_address);
   if (payload != _payloads.end()) {
