@@ -246,6 +246,11 @@ void EspNowHost::handleChallengeRequest(uint8_t *mac_addr, uint32_t challenge_ch
     _challenges[mac_address] = header_challenge;
   }
 
+  // Timestamp in UTC.
+  time_t now = time(nullptr);
+  struct tm *utc_time = gmtime(&now);
+  uint64_t timestamp = static_cast<uint64_t>(mktime(utc_time));
+
   // Any firmware to update?
   if (_firwmare_update) {
     auto metadata = _firwmare_update(mac_address, firmware_version);
@@ -263,11 +268,6 @@ void EspNowHost::handleChallengeRequest(uint8_t *mac_addr, uint32_t challenge_ch
       return;
     }
   }
-
-  // Timestamp in UTC.
-  time_t now = time(nullptr);
-  struct tm *utc_time = gmtime(&now);
-  uint64_t timestamp = static_cast<uint64_t>(mktime(utc_time));
 
   auto payload = _payloads.find(mac_address);
   if (payload != _payloads.end()) {
