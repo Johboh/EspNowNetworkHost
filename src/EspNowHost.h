@@ -8,6 +8,7 @@
 #include <functional>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 
 /**
@@ -123,6 +124,28 @@ public:
   bool start();
   bool setup() { return start(); }
 
+  /**
+   * If called with a payload, the node will receive this buffer in the next challenge, unless there is a firmware
+   * update. This can be useful to pass any application data to the node, like configurations.
+   * Any payload set here will be kept and sent on next challenge request, and once sent sucessfully, it will be
+   * cleared. The payload will be copied into the outgoing payload queue, so no need to hold onto the buffer.
+   * Any call to this will override any previous payload if payload has not been delivered yet.
+   * pendingOutgoingPayload() can be used to check if payload has been sent.
+   * Any firmware update will take precedence over payloads.
+   *
+   * Call with null buffer and/or 0 size to clear any pending payload.
+   *
+   * @param mac_address the mac address of the node to send the payload to.
+   * @param buffer pointer to the buffer to send, of size.
+   * @param size the size in bytes, maxium 200 bytes, of payload.
+   */
+  void setPayload(uint64_t mac_address, uint8_t *buffer, uint8_t size);
+
+  /**
+   * Return true if there is a pending outgoing payload, set by setPayload(), that has not been delivered yet.
+   */
+  bool pendingOutgoingPayload(uint64_t mac_address);
+
 private:
   static void esp_now_on_data_sent(const uint8_t *mac_addr, esp_now_send_status_t status);
   static void esp_now_on_data_callback_legacy(const uint8_t *mac_addr, const uint8_t *data, int data_len);
@@ -139,18 +162,26 @@ private:
 
   void sendMessageToTemporaryPeer(uint8_t *mac_addr, void *message, size_t length);
 
-  uint64_t macToMac(uint8_t *mac_addr);
+  static uint64_t macToMac(uint8_t *mac_addr);
 
   void log(const std::string message, const esp_log_level_t log_level);
   void log(const std::string message, const esp_err_t esp_err);
 
-  std::string toHex(uint64_t i);
+  static std::string toHex(uint64_t i);
 
 private:
   EspNowCrypt &_crypt;
   Configuration _configuration;
   // Map from MAC address to challenge.
   std::map<uint64_t, uint32_t> _challenges;
+
+  struct Payload {
+    uint8_t *buffer;
+    uint8_t size;
+  };
+
+  // Map of payloads to send.
+  std::map<uint64_t, Payload> _payloads;
 
   OnLog _on_log;
   OnNewMessage _on_new_message;

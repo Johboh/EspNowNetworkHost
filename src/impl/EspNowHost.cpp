@@ -2,31 +2,35 @@
 
 #include "esp-now-structs.h"
 #include <cstring>
+#include <ctime>
 #include <esp_random.h>
 #include <esp_wifi.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
 #include <sstream>
 
-// Bits used for send ACKs to notify the _send_result_event_group Even Group.
-#define SEND_SUCCESS_BIT 0x01
-#define SEND_FAIL_BIT 0x02
-
-struct Element {
+struct Message {
   size_t data_len = 0;
   uint8_t data[255]; // Max message size on ESP-NOW is 250.
   uint8_t mac_addr[ESP_NOW_ETH_ALEN];
 };
 
-static QueueHandle_t _receive_queue = xQueueCreate(10, sizeof(Element));
-static EventGroupHandle_t _send_result_event_group = xEventGroupCreate();
+static QueueHandle_t _receive_queue = xQueueCreate(10, sizeof(Message));
+
+struct Delivered {
+  bool successful;
+  uint8_t mac_addr[ESP_NOW_ETH_ALEN];
+};
+
+static QueueHandle_t _send_result_event_queue = xQueueCreate(10, sizeof(Delivered));
 
 void EspNowHost::esp_now_on_data_sent(const uint8_t *mac_addr, esp_now_send_status_t status) {
-  // Set event bits based on result.
+  Delivered delivered;
+  delivered.successful = status == ESP_NOW_SEND_SUCCESS;
+  std::memcpy(delivered.mac_addr, mac_addr, ESP_NOW_ETH_ALEN);
+
   auto xHigherPriorityTaskWoken = pdFALSE;
-  auto result = xEventGroupSetBitsFromISR(_send_result_event_group,
-                                          status == ESP_NOW_SEND_SUCCESS ? SEND_SUCCESS_BIT : SEND_FAIL_BIT,
-                                          &xHigherPriorityTaskWoken);
+  auto result = xQueueSendFromISR(_send_result_event_queue, &delivered, &xHigherPriorityTaskWoken);
   if (result != pdFAIL && xHigherPriorityTaskWoken == pdTRUE) {
     portYIELD_FROM_ISR();
   }
@@ -35,15 +39,15 @@ void EspNowHost::esp_now_on_data_sent(const uint8_t *mac_addr, esp_now_send_stat
 void EspNowHost::esp_now_on_data_callback_legacy(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
   // New message received on ESP-NOW.
   // Add to queue and leave callback as soon as we can.
-  Element element;
-  std::memcpy(element.mac_addr, mac_addr, ESP_NOW_ETH_ALEN);
+  Message message;
+  std::memcpy(message.mac_addr, mac_addr, ESP_NOW_ETH_ALEN);
   if (data_len > 0) {
-    std::memcpy(element.data, data, std::min((size_t)data_len, sizeof(element.data)));
+    std::memcpy(message.data, data, std::min((size_t)data_len, sizeof(message.data)));
   }
-  element.data_len = data_len;
+  message.data_len = data_len;
 
   auto xHigherPriorityTaskWoken = pdFALSE;
-  auto result = xQueueSendFromISR(_receive_queue, &element, &xHigherPriorityTaskWoken);
+  auto result = xQueueSendFromISR(_receive_queue, &message, &xHigherPriorityTaskWoken);
   if (result != pdFAIL && xHigherPriorityTaskWoken == pdTRUE) {
     portYIELD_FROM_ISR();
   }
@@ -65,19 +69,19 @@ void EspNowHost::newMessageTask(void *pvParameters) {
   EspNowHost *_this = (EspNowHost *)pvParameters;
 
   while (1) {
-    Element element;
-    auto result = xQueueReceive(_receive_queue, &element, portMAX_DELAY);
+    Message message;
+    auto result = xQueueReceive(_receive_queue, &message, portMAX_DELAY);
     if (result == pdPASS) {
       // We have a new message!
       if (_this->_on_new_message) {
         _this->_on_new_message(); // Notify.
       }
 
-      auto decrypted_data = _this->_crypt.decryptMessage(element.data);
+      auto decrypted_data = _this->_crypt.decryptMessage(message.data);
       if (decrypted_data != nullptr) {
-        _this->handleQueuedMessage(element.mac_addr, decrypted_data.get());
+        _this->handleQueuedMessage(message.mac_addr, decrypted_data.get());
       } else {
-        uint64_t mac_address = _this->macToMac(element.mac_addr);
+        uint64_t mac_address = _this->macToMac(message.mac_addr);
         _this->log("Failed to decrypt message received from 0x" + _this->toHex(mac_address), ESP_LOG_WARN);
       }
     }
@@ -87,13 +91,17 @@ void EspNowHost::messageDeliveredTask(void *pvParameters) {
   EspNowHost *_this = (EspNowHost *)pvParameters;
 
   while (1) {
-    auto bits =
-        xEventGroupWaitBits(_send_result_event_group, SEND_SUCCESS_BIT | SEND_FAIL_BIT, pdTRUE, pdFALSE, portMAX_DELAY);
-    if ((bits & SEND_SUCCESS_BIT) != 0) {
-      _this->log("Message delivered.", ESP_LOG_INFO);
-    }
-    if ((bits & SEND_FAIL_BIT) != 0) {
-      _this->log("Message fail to deliver.", ESP_LOG_INFO);
+    Delivered delivered;
+    auto result = xQueueReceive(_send_result_event_queue, &delivered, portMAX_DELAY);
+    if (result == pdPASS) {
+      if (delivered.successful) {
+        _this->log("Message delivered.", ESP_LOG_INFO);
+        auto mac_address = macToMac(delivered.mac_addr);
+        // Clear/mark payload as sent.
+        _this->setPayload(mac_address, nullptr, 0);
+      } else {
+        _this->log("Message fail to deliver.", ESP_LOG_INFO);
+      }
     }
   }
 }
@@ -251,10 +259,35 @@ void EspNowHost::handleChallengeRequest(uint8_t *mac_addr, uint32_t challenge_ch
     }
   }
 
-  // No firmware update (early return above)
+  // Will be local time if timezone is set for host (setenv("TZ")), otherwise UTC.
+  time_t now = time(nullptr);
+  struct tm *local_time = localtime(&now);
+  uint64_t timestamp = static_cast<uint64_t>(mktime(local_time));
+
+  auto payload = _payloads.find(mac_address);
+  if (payload != _payloads.end()) {
+    log("Sending payload response to 0x" + toHex(mac_address), ESP_LOG_INFO);
+    EspNowChallengePayloadResponseV1 message;
+    message.header_challenge = header_challenge;
+    message.challenge_challenge = challenge_challenge;
+    message.payload_size = payload->second.size;
+    message.timestamp = timestamp;
+    // Create temporary message to send on wire with appended payload.
+    size_t message_with_payload_size = sizeof(EspNowChallengePayloadResponseV1) + message.payload_size;
+    std::unique_ptr<uint8_t[]> message_with_payload(new (std::nothrow) uint8_t[message_with_payload_size]);
+    // Copy response message and payload to temporary message.
+    memcpy(message_with_payload.get(), &message, sizeof(EspNowChallengePayloadResponseV1));
+    memcpy(message_with_payload.get() + sizeof(EspNowChallengePayloadResponseV1), payload->second.buffer,
+           message.payload_size);
+    sendMessageToTemporaryPeer(mac_addr, message_with_payload.get(), message_with_payload_size);
+    return;
+  }
+
+  // No firmware update nor payload to send (early returns above)
   EspNowChallengeResponseV1 message;
   message.header_challenge = header_challenge;
   message.challenge_challenge = challenge_challenge;
+  message.timestamp = timestamp;
   log("Sending challenge response to 0x" + toHex(mac_address) + " with challenge " +
           std::to_string(message.header_challenge),
       ESP_LOG_INFO);
@@ -283,6 +316,35 @@ void EspNowHost::sendMessageToTemporaryPeer(uint8_t *mac_addr, void *message, si
   r = esp_now_del_peer(mac_addr);
   log("esp_now_del_peer failure: ", r);
 }
+
+void EspNowHost::setPayload(uint64_t mac_address, uint8_t *buffer, uint8_t size) {
+  // If any call to this function, we should clear any existing entry.
+  auto payload = _payloads.find(mac_address);
+  if (payload != _payloads.end()) {
+    auto existing_buffer = payload->second.buffer;
+    if (existing_buffer != nullptr) {
+      free(existing_buffer);
+    }
+    _payloads.erase(mac_address);
+  }
+
+  if (size > 0 && buffer != nullptr) {
+    // Allocate memory, and clear it later (above)
+    Payload payload = {
+        .buffer = nullptr,                    // Allocate below.
+        .size = std::min(size, (uint8_t)200), // TODO(johboh): Move to constant
+    };
+    payload.buffer = (uint8_t *)malloc(payload.size);
+    if (payload.buffer == nullptr) {
+      log("Failed to allocate memory for payload buffer.", ESP_LOG_ERROR);
+      return;
+    }
+    memcpy(payload.buffer, buffer, payload.size);
+    _payloads[mac_address] = payload;
+  }
+}
+
+bool EspNowHost::pendingOutgoingPayload(uint64_t mac_address) { return _payloads.find(mac_address) != _payloads.end(); }
 
 uint64_t EspNowHost::macToMac(uint8_t *mac_addr) {
   return ((uint64_t)mac_addr[0] << 40) + ((uint64_t)mac_addr[1] << 32) + ((uint64_t)mac_addr[2] << 24) +
