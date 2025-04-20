@@ -146,6 +146,30 @@ public:
    */
   bool pendingOutgoingPayload(uint64_t mac_address);
 
+  /**
+   * @brief Allow skipping challenge requests for specific nodes.
+   *
+   * If the host allows it, challenge requests can be skipped per mac address of node.
+   *
+   * Normally challenge requests are used to prevent replay attacks, when the node is requesting a unique challenge from
+   * the host to use in the subsequent message. This challenge is randomized by the host. Upon responding to the
+   * challenge request, the host also have the option to indicate that there is a new firmware as well as send any
+   * additional payload/configuration. By skipping the challenge request, these two options are not possible. During the
+   * challenge request, there is a detection mechanism on the node to detect WiFi channel change as well as change of
+   * host, if we prevoulsy had a valid channel and host. If challenge request is disabled, this check will also not
+   * happen.
+   *
+   * For the node, challenge requests involves sending and receiving one additional package. Disabling challenge
+   * request will reduce latency and save power consumption, but with a cost in terms of reduced security, error
+   * detection and firwmare/payload support.
+   *
+   * If a challenge request is recived, the host will always anwer it even if the host is allowed to not require them.
+   *
+   * @param mac_addresses a set of mac addresses to allow skipping challenge requests for. Empty list to require
+   * challenge requests for all nodes, which is the default.
+   */
+  void allowToSkipChallengeVerification(std::set<uint64_t> mac_addresses);
+
 private:
   static void esp_now_on_data_sent(const uint8_t *mac_addr, esp_now_send_status_t status);
   static void esp_now_on_data_callback_legacy(const uint8_t *mac_addr, const uint8_t *data, int data_len);
@@ -187,6 +211,7 @@ private:
   OnNewMessage _on_new_message;
   FirmwareUpdateAvailable _firwmare_update;
   OnApplicationMessage _on_application_message;
+  std::set<uint64_t> _allow_to_skip_challenge_verification;
 };
 
 #endif // __ESP_NOW_HOST_H__

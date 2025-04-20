@@ -160,14 +160,18 @@ void EspNowHost::handleQueuedMessage(uint8_t *mac_addr, uint8_t *data) {
   case MESSAGE_ID_HEADER: {
     typedef EspNowMessageHeaderV1 Message;
     auto *message = (Message *)data;
+    auto allow_to_skip_challenge_verification =
+        _allow_to_skip_challenge_verification.find(mac_address) != _allow_to_skip_challenge_verification.end();
+
     log("Got application message from 0x" + toHex(mac_address) +
-            " with challange: " + std::to_string(message->header_challenge),
+            (allow_to_skip_challenge_verification ? ", skipping challenge verifcation"
+                                                  : " with challange: " + std::to_string(message->header_challenge)),
         ESP_LOG_INFO);
-    // Verify challenge.
+    // Verify challenge, unless we are allowed to skip verification for this node.
     auto challenge = _challenges.find(mac_address);
-    if (challenge != _challenges.end()) {
+    if (allow_to_skip_challenge_verification || challenge != _challenges.end()) {
       auto expected_challenge = challenge->second;
-      if (expected_challenge == message->header_challenge) {
+      if (allow_to_skip_challenge_verification || expected_challenge == message->header_challenge) {
         metadata.retries = message->retries;
         auto outer_message_size = sizeof(Message);
         const uint8_t *inner_message = data + outer_message_size;
@@ -345,6 +349,10 @@ void EspNowHost::setPayload(uint64_t mac_address, uint8_t *buffer, uint8_t size)
 }
 
 bool EspNowHost::pendingOutgoingPayload(uint64_t mac_address) { return _payloads.find(mac_address) != _payloads.end(); }
+
+void EspNowHost::allowToSkipChallengeVerification(std::set<uint64_t> mac_addresses) {
+  _allow_to_skip_challenge_verification = mac_addresses;
+}
 
 uint64_t EspNowHost::macToMac(uint8_t *mac_addr) {
   return ((uint64_t)mac_addr[0] << 40) + ((uint64_t)mac_addr[1] << 32) + ((uint64_t)mac_addr[2] << 24) +
