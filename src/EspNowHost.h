@@ -1,7 +1,7 @@
 #ifndef __ESP_NOW_HOST_H__
 #define __ESP_NOW_HOST_H__
 
-#include <EspNowCrypt.h>
+#include <GCMEncryption.h>
 #include <esp_idf_version.h>
 #include <esp_log.h>
 #include <esp_now.h>
@@ -96,7 +96,7 @@ public:
   /**
    * @brief Construct a new EspNowHost
    *
-   * @param crypt the EspNowCrypt to use for encrypting/decrypting messages.
+   * @param crypt the GCMEncryption to use for encrypting/decrypting messages.
    * @param configuration the configuration to use.
    * @param on_new_message callback on any new message received, regardless of type, validation, decrypted correctly
    * etc. Intended for turning on led or similar to indicate new package. Please note that this function will be
@@ -113,7 +113,7 @@ public:
    * called on every challenge request sent by the node, so this function must return fast and not perform any heavy
    * computation or network.
    */
-  EspNowHost(EspNowCrypt &crypt, Configuration configuration, OnNewMessage on_new_message,
+  EspNowHost(GCMEncryption &crypt, Configuration configuration, OnNewMessage on_new_message,
              OnApplicationMessage on_application_message, FirmwareUpdateAvailable firwmare_update = {},
              OnLog on_log = {});
 
@@ -194,7 +194,7 @@ private:
   static std::string toHex(uint64_t i);
 
 private:
-  EspNowCrypt &_crypt;
+  GCMEncryption &_crypt;
   Configuration _configuration;
   // Map from MAC address to challenge.
   std::map<uint64_t, uint32_t> _challenges;

@@ -59,7 +59,7 @@ void EspNowHost::esp_now_on_data_callback(const esp_now_recv_info_t *esp_now_inf
 }
 #endif
 
-EspNowHost::EspNowHost(EspNowCrypt &crypt, EspNowHost::Configuration configuration, OnNewMessage on_new_message,
+EspNowHost::EspNowHost(GCMEncryption &crypt, EspNowHost::Configuration configuration, OnNewMessage on_new_message,
                        OnApplicationMessage on_application_message, FirmwareUpdateAvailable firwmare_update,
                        OnLog on_log)
     : _crypt(crypt), _configuration(configuration), _on_log(on_log), _on_new_message(on_new_message),
@@ -77,9 +77,9 @@ void EspNowHost::newMessageTask(void *pvParameters) {
         _this->_on_new_message(); // Notify.
       }
 
-      auto decrypted_data = _this->_crypt.decryptMessage(message.data);
-      if (decrypted_data != nullptr) {
-        _this->handleQueuedMessage(message.mac_addr, decrypted_data.get());
+      auto decrypted_data = _this->_crypt.decrypt(message.data);
+      if (!decrypted_data.empty()) {
+        _this->handleQueuedMessage(message.mac_addr, decrypted_data.data());
       } else {
         uint64_t mac_address = _this->macToMac(message.mac_addr);
         _this->log("Failed to decrypt message received from 0x" + _this->toHex(mac_address), ESP_LOG_WARN);
@@ -304,13 +304,14 @@ void EspNowHost::sendMessageToTemporaryPeer(uint8_t *mac_addr, void *message, si
   peer_info.ifidx = _configuration.wifi_interface == WiFiInterface::AP ? WIFI_IF_AP : WIFI_IF_STA;
   // Channel 0 means "use the current channel which station or softap is on".
   peer_info.channel = 0;
-  peer_info.encrypt = false; // Never use esp NOW encryption. We run our own encryption (see EspNowCryp.h)
+  peer_info.encrypt = false; // Never use esp NOW encryption.
   std::memcpy(peer_info.peer_addr, mac_addr, ESP_NOW_ETH_ALEN);
 
   esp_err_t r = esp_now_add_peer(&peer_info);
   log("esp_now_add_peer failure: ", r);
 
-  r = _crypt.sendMessage(mac_addr, message, length);
+  auto encrypted = _crypt.encrypt(message, length);
+  r = esp_now_send(mac_addr, encrypted.data(), encrypted.size());
   if (r != ESP_OK) {
     log("_crypt.sendMessage() failure: ", r);
   } else {

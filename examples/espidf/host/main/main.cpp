@@ -1,5 +1,5 @@
-#include <EspNowCrypt.h>
 #include <EspNowHost.h>
+#include <GCMEncryption.h>
 #include <driver/gpio.h>
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
@@ -72,8 +72,8 @@ EspNowHost::OnLog _on_log = [](const std::string message, const esp_log_level_t 
   esp_log_write(log_level, TAG, "EspNowNode: %s\n", message.c_str());
 };
 
-EspNowCrypt _esp_now_crypt(esp_now_encryption_key, esp_now_encryption_secret);
-EspNowHost _esp_now_host(_esp_now_crypt, {.wifi_interface = EspNowHost::WiFiInterface::STA}, _on_new_message,
+GCMEncryption _gcm_encryption(esp_now_encryption_key, esp_now_encryption_secret);
+EspNowHost _esp_now_host(_gcm_encryption, {.wifi_interface = EspNowHost::WiFiInterface::STA}, _on_new_message,
                          _on_application_message, _firmware_update_available, _on_log);
 
 extern "C" {
