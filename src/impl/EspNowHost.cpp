@@ -45,9 +45,12 @@ void EspNowHost::esp_now_on_data_callback_legacy(const uint8_t *mac_addr, const 
   Message message;
   std::memcpy(message.mac_addr, mac_addr, ESP_NOW_ETH_ALEN);
   if (data_len > 0) {
-    std::memcpy(message.data, data, std::min((size_t)data_len, sizeof(message.data)));
+    size_t copy_len = std::min((size_t)data_len, sizeof(message.data));
+    std::memcpy(message.data, data, copy_len);
+    message.data_len = copy_len;
+  } else {
+    message.data_len = 0;
   }
-  message.data_len = data_len;
 
   auto xHigherPriorityTaskWoken = pdFALSE;
   auto result = xQueueSendFromISR(_receive_queue, &message, &xHigherPriorityTaskWoken);
@@ -80,7 +83,7 @@ void EspNowHost::newMessageTask(void *pvParameters) {
         _this->_on_new_message(); // Notify.
       }
 
-      auto decrypted_data = _this->_crypt.decrypt(message.data);
+      auto decrypted_data = _this->_crypt.decrypt(message.data, std::min(message.data_len, sizeof(message.data)));
       if (!decrypted_data.empty()) {
         _this->handleQueuedMessage(message.mac_addr, decrypted_data.data());
       } else {
