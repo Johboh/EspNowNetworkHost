@@ -7,9 +7,12 @@
 #include <cstring>
 #include <ctime>
 #include <esp_random.h>
+#include <esp_system.h>
 #include <esp_wifi.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
+#include <freertos/queue.h>
+#include <freertos/task.h>
 #include <sstream>
 
 struct Message {
@@ -27,7 +30,18 @@ struct Delivered {
 
 static QueueHandle_t _send_result_event_queue = xQueueCreate(10, sizeof(Delivered));
 
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 0)
+void EspNowHost::esp_now_on_data_sent(const esp_now_send_info_t *tx_info, esp_now_send_status_t status) {
+  const uint8_t *mac_addr = tx_info ? tx_info->des_addr : nullptr;
+  if (mac_addr == nullptr) {
+    return;
+  }
+#else
 void EspNowHost::esp_now_on_data_sent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+  if (mac_addr == nullptr) {
+    return;
+  }
+#endif
   Delivered delivered;
   delivered.successful = status == ESP_NOW_SEND_SUCCESS;
   std::memcpy(delivered.mac_addr, mac_addr, ESP_NOW_ETH_ALEN);
@@ -40,6 +54,9 @@ void EspNowHost::esp_now_on_data_sent(const uint8_t *mac_addr, esp_now_send_stat
 }
 
 void EspNowHost::esp_now_on_data_callback_legacy(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
+  if (mac_addr == nullptr) {
+    return;
+  }
   // New message received on ESP-NOW.
   // Add to queue and leave callback as soon as we can.
   Message message;
@@ -61,7 +78,9 @@ void EspNowHost::esp_now_on_data_callback_legacy(const uint8_t *mac_addr, const 
 
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
 void EspNowHost::esp_now_on_data_callback(const esp_now_recv_info_t *esp_now_info, const uint8_t *data, int data_len) {
-  esp_now_on_data_callback_legacy(esp_now_info->src_addr, data, data_len);
+  if (esp_now_info != nullptr && esp_now_info->src_addr != nullptr) {
+    esp_now_on_data_callback_legacy(esp_now_info->src_addr, data, data_len);
+  }
 }
 #endif
 
@@ -122,7 +141,7 @@ bool EspNowHost::start() {
   ESP_ERROR_CHECK(esp_wifi_set_protocol(WIFI_IF_STA, protocol_bitmap));
 
   esp_err_t r = esp_now_init();
-  if (r != 0) {
+  if (r != ESP_OK) {
     log("Error initializing ESP-NOW:", r);
     vTaskDelay(5000 / portTICK_PERIOD_MS);
     esp_restart();
@@ -136,13 +155,13 @@ bool EspNowHost::start() {
   r = esp_now_register_recv_cb(esp_now_on_data_callback_legacy);
 #endif
   log("Registering receive callback for ESP-NOW failed:", r);
+  bool ok = r == ESP_OK;
 
   if (_configuration.with_delivered_task) {
     r = esp_now_register_send_cb(esp_now_on_data_sent);
     log("Registering send callback for esp now failed:", r);
+    ok = ok && (r == ESP_OK);
   }
-
-  auto ok = r == ESP_OK;
 
   if (ok) {
     xTaskCreate(newMessageTask, "new_message_task", 8192, this, 20, NULL);
@@ -306,7 +325,7 @@ void EspNowHost::handleChallengeRequest(uint8_t *mac_addr, uint32_t challenge_ch
 }
 
 void EspNowHost::sendMessageToTemporaryPeer(uint8_t *mac_addr, void *message, size_t length) {
-  esp_now_peer_info_t peer_info;
+  esp_now_peer_info_t peer_info = {};
   peer_info.ifidx = _configuration.wifi_interface == WiFiInterface::AP ? WIFI_IF_AP : WIFI_IF_STA;
   // Channel 0 means "use the current channel which station or softap is on".
   peer_info.channel = 0;

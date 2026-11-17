@@ -1,9 +1,9 @@
 version: "0.8.3"
-description: Node code for the EspNowNetwork, see https://github.com/Johboh/EspNowNetwork for more details.
+description: Host code for the EspNowNetwork, see https://github.com/Johboh/EspNowNetwork for more details.
 url: https://github.com/Johboh/EspNowNetworkHost
 license: "GPL-3.0-or-later"
 dependencies:
-  idf: ">=4.4"
+  idf: ">=5.0"
   johboh/espnownetworkshared:
     version: ">=1.0.4"
   johboh/gcmencryption:

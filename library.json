@@ -1,7 +1,7 @@
 {
   "name": "EspNowNetworkHost",
   "keywords": "esp32, esp-now, ESP Now, now",
-  "description": "Node code for the EspNowNetwork, see https://github.com/Johboh/EspNowNetwork for more details.",
+  "description": "Host code for the EspNowNetwork, see https://github.com/Johboh/EspNowNetwork for more details.",
   "$schema": "https://raw.githubusercontent.com/platformio/platformio-core/develop/platformio/assets/schema/library.json",
   "authors":
   {

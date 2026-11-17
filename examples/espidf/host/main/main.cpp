@@ -25,9 +25,6 @@ struct MySecondApplicationMessage {
 };
 #pragma pack(0)
 
-// Change this to your LED pin
-#define LED_PIN GPIO_NUM_15
-
 const char wifi_ssid[] = "my-wifi-ssid";
 const char wifi_password[] = "my-wifi-password";
 // Encyption key used for our own packet encryption (GCM).
